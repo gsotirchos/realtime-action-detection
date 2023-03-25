@@ -130,16 +130,20 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
                     scores = conf_scores[:, cl_ind].squeeze()
                     c_mask = scores.gt(args.conf_thresh)  # greater than minmum threshold
                     scores = scores[c_mask].squeeze()
+                    # print(cl_ind, scores, scores.dim())
                     # print('scores size',scores.size())
                     if scores.dim() == 0:
                         # print(len(''), ' dim ==0 ')
                         det_boxes[cl_ind - 1].append(np.asarray([]))
+                        continue
+                    if scores.nelement() == 0:
                         continue
                     boxes = decoded_boxes.clone()
                     l_mask = c_mask.unsqueeze(1).expand_as(boxes)
                     boxes = boxes[l_mask].view(-1, 4)
                     # idx of highest scoring and non-overlapping boxes per class
                     ids, counts = nms(boxes, scores, args.nms_thresh, args.topk)  # idsn - ids after nms
+                    # ids, counts = [0], 1
                     scores = scores[ids[:counts]].cpu().numpy()
                     boxes = boxes[ids[:counts]].cpu().numpy()
                     # print('boxes sahpe',boxes.shape)
@@ -189,9 +193,11 @@ def main():
     args.listid = '01' ## would be usefull in JHMDB-21
     print('Exp name', exp_name, args.listid)
     for iteration in [int(itr) for itr in args.eval_iter.split(',')]:
-        log_file = open(args.save_root + 'cache/' + exp_name + "/testing-{:d}.log".format(iteration), "w", 1)
+        # log_file = open(args.save_root + 'cache/' + exp_name + "/testing-{:d}.log".format(iteration), "w", 1)
+        log_file = open(os.path.dirname(os.path.realpath(__file__)) + "/testing-{:d}.log".format(iteration), "w", 1)
         log_file.write(exp_name + '\n')
-        trained_model_path = args.save_root + 'cache/' + exp_name + '/ssd300_ucf24_' + repr(iteration) + '.pth'
+        # trained_model_path = args.save_root + 'cache/' + exp_name + '/ssd300_ucf24_' + repr(iteration) + '.pth'
+        trained_model_path = os.path.dirname(os.path.realpath(__file__)) + '/ICCV-2017-data/' + args.basenet
         log_file.write(trained_model_path+'\n')
         num_classes = len(CLASSES) + 1  #7 +1 background
         net = build_ssd(300, num_classes)  # initialize SSD
