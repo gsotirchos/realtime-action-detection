@@ -74,7 +74,8 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
     print_time = True
     batch_iterator = None
     count = 0
-    torch.cuda.synchronize()
+    if args.cuda:
+        torch.cuda.synchronize()
     ts = time.perf_counter()
     num_batches = len(val_data_loader)
     det_file = save_root + 'cache/' + exp_name + '/detection-'+str(iteration).zfill(6)+'.pkl'
@@ -85,8 +86,8 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
         for val_itr in range(len(val_data_loader)):
             if not batch_iterator:
                 batch_iterator = iter(val_data_loader)
-
-            torch.cuda.synchronize()
+            if args.cuda:
+                torch.cuda.synchronize()
             t1 = time.perf_counter()
 
             images, targets, img_indexs = next(batch_iterator)
@@ -102,7 +103,8 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
             prior_data = output[2]
 
             if print_time and val_itr%val_step == 0:
-                torch.cuda.synchronize()
+                if args.cuda:
+                    torch.cuda.synchronize()
                 tf = time.perf_counter()
                 print('Forward Time {:0.3f}'.format(tf - t1))
             for b in range(batch_size):
@@ -163,13 +165,16 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
 
                 count += 1
             if val_itr%val_step == 0:
-                torch.cuda.synchronize()
+                if args.cuda:
+                    torch.cuda.synchronize()
                 te = time.perf_counter()
                 print('im_detect: {:d}/{:d} time taken {:0.3f}'.format(count, num_images, te - ts))
-                torch.cuda.synchronize()
+                if args.cuda:
+                    torch.cuda.synchronize()
                 ts = time.perf_counter()
             if print_time and val_itr%val_step == 0:
-                torch.cuda.synchronize()
+                if args.cuda:
+                    torch.cuda.synchronize()
                 te = time.perf_counter()
                 print('NMS stuff Time {:0.3f}'.format(te - tf))
     print('Evaluating detections for itration number ', iteration)
@@ -201,7 +206,11 @@ def main():
         log_file.write(trained_model_path+'\n')
         num_classes = len(CLASSES) + 1  #7 +1 background
         net = build_ssd(300, num_classes)  # initialize SSD
-        net.load_state_dict(torch.load(trained_model_path))
+        if args.cuda:
+            net.load_state_dict(torch.load(trained_model_path))
+        else:
+            net.load_state_dict(torch.load(trained_model_path),
+                                map_location=torch.device('cpu'))
         net.eval()
         if args.cuda:
             net = net.cuda()
@@ -211,7 +220,8 @@ def main():
         dataset = UCF24Detection(args.data_root, 'test', BaseTransform(args.ssd_dim, means), AnnotationTransform(),
                                  input_type=args.input_type, full_test=True)
         # evaluation
-        torch.cuda.synchronize()
+        if args.cuda:
+            torch.cuda.synchronize()
         tt0 = time.perf_counter()
         log_file.write('Testing net \n')
         mAP, ap_all, ap_strs = test_net(net, args.save_root, exp_name, args.input_type, dataset, iteration, num_classes)
@@ -222,7 +232,8 @@ def main():
         print(ptr_str)
         log_file.write(ptr_str)
 
-        torch.cuda.synchronize()
+        if args.cuda:
+            torch.cuda.synchronize()
         print('Complete set time {:0.2f}'.format(time.perf_counter() - tt0))
         log_file.close()
 
