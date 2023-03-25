@@ -145,7 +145,6 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
                     boxes = boxes[l_mask].view(-1, 4)
                     # idx of highest scoring and non-overlapping boxes per class
                     ids, counts = nms(boxes, scores, args.nms_thresh, args.topk)  # idsn - ids after nms
-                    # ids, counts = [0], 1
                     scores = scores[ids[:counts]].cpu().numpy()
                     boxes = boxes[ids[:counts]].cpu().numpy()
                     # print('boxes sahpe',boxes.shape)
