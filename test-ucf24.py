@@ -209,8 +209,8 @@ def main():
         if args.cuda:
             net.load_state_dict(torch.load(trained_model_path))
         else:
-            net.load_state_dict(torch.load(trained_model_path),
-                                map_location=torch.device('cpu'))
+            net.load_state_dict(torch.load(trained_model_path,
+                                map_location=torch.device('cpu')))
         net.eval()
         if args.cuda:
             net = net.cuda()
