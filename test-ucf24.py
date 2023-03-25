@@ -206,13 +206,12 @@ def main():
         log_file.write(trained_model_path+'\n')
         num_classes = len(CLASSES) + 1  #7 +1 background
         net = build_ssd(300, num_classes)  # initialize SSD
-        summary(net)
-        return
         if args.cuda:
             net.load_state_dict(torch.load(trained_model_path))
         else:
             net.load_state_dict(torch.load(trained_model_path,
                                 map_location=torch.device('cpu')))
+        summary(net)
         net.eval()
         if args.cuda:
             net = net.cuda()
