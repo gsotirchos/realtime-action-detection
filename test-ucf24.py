@@ -21,6 +21,7 @@ import argparse
 import numpy as np
 import pickle
 import scipy.io as sio # to save detection as mat files
+from torchinfo import summary
 cfg = v2
 
 def str2bool(v):
@@ -205,6 +206,8 @@ def main():
         log_file.write(trained_model_path+'\n')
         num_classes = len(CLASSES) + 1  #7 +1 background
         net = build_ssd(300, num_classes)  # initialize SSD
+        summary(net)
+        return
         if args.cuda:
             net.load_state_dict(torch.load(trained_model_path))
         else:
