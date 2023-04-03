@@ -135,11 +135,9 @@ def test_net(net, save_root, exp_name, input_type, dataset, iteration, num_class
                     scores = scores[c_mask].squeeze()
                     # print(cl_ind, scores, scores.dim())
                     # print('scores size',scores.size())
-                    if scores.dim() == 0:
+                    if scores.dim() == 0 or scores.nelement() == 0:
                         # print(len(''), ' dim ==0 ')
                         det_boxes[cl_ind - 1].append(np.asarray([]))
-                        continue
-                    if scores.nelement() == 0:
                         continue
                     boxes = decoded_boxes.clone()
                     l_mask = c_mask.unsqueeze(1).expand_as(boxes)
