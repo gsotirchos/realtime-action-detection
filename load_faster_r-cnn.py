@@ -14,14 +14,13 @@ CUDA = False
 BASENET = "./rgb-ssd300_ucf24_120000.pth"  # pretrained model parameter file
 DATASET_PATH = "./ucf24/"  # dataset directory (needs that '/')
 NUM_CLASSES = len(CLASSES) + 1  # +1 'background' class
-BATCH_SIZE = 1
 CUTOFF = 20
 SSD_DIM = 300  # input size for SSD
 NUM_WORKERS = 0  # number of workers used in dataloading
 MEANS = (104, 117, 123)  # 'only support voc now'
 CONF_THRESH = 0.01  # confidence threshold for evaluation
-NMS_THRESH = 0.45  # non-maxima suppression threshold
-TOP_K = 20  # top k confidence scores, for non-maxima suppression
+NMS_THRESH = 0.45  # non-maximum suppression threshold
+TOP_K = 20  # top k confidence scores, for non-maximum suppression
 
 
 if CUDA and torch.cuda.is_available():
@@ -34,7 +33,6 @@ def detect_actions(net, dataset):
     """ Test a SSD network on an Action image database. """
 
     val_data_loader = data.DataLoader(dataset,
-                                      BATCH_SIZE,
                                       num_workers=NUM_WORKERS,
                                       shuffle=False,
                                       collate_fn=detection_collate,
@@ -42,21 +40,21 @@ def detect_actions(net, dataset):
     if CUDA:
         torch.cuda.synchronize()
 
-    num_batches = len(val_data_loader)
+    num_samples = len(val_data_loader)
     print('Number of images: ', len(dataset),
-          '\nNumber of batches: ', num_batches)
+          '\nNumber of batches: ', num_samples)
 
     detections_boxes = [[] for _ in range(NUM_CLASSES)]
     batch_iterator = None
     with torch.no_grad():
-        # iterate over batches
-        for batch_ind in range(len(val_data_loader)):
+        # iterate over samples
+        for sample_ind in range(num_samples):
             if not batch_iterator:
                 batch_iterator = iter(val_data_loader)
             if CUDA:
                 torch.cuda.synchronize()
 
-            print('- Batch: ', batch_ind, '/', num_batches)
+            print('- Sample: ', sample_ind, '/', num_samples)
 
             images, targets, img_indexs = next(batch_iterator)
             height, width = images.size(2), images.size(3)
@@ -69,56 +67,55 @@ def detect_actions(net, dataset):
             conf_preds = output[1]
             prior_data = output[2]
 
-            # iterate over samples in a batch
-            for b in range(BATCH_SIZE):
-                # print('-- Sample: ', b)
-                decoded_boxes = decode(loc_data[b].data,
-                                       prior_data.data,
-                                       v2['variance']).clone()
-                conf_scores = net.softmax(conf_preds[b]).data.clone()
+            decoded_boxes = decode(loc_data[0].data,
+                                   prior_data.data,
+                                   v2['variance']).clone()
+            conf_scores = net.softmax(conf_preds[0]).data.clone()
 
-                # iterate over all classes
-                for cl_ind in range(1, NUM_CLASSES):
-                    class_scores = conf_scores[:, cl_ind].squeeze()
-                    conf_mask = class_scores.gt(CONF_THRESH)
-                    class_scores = class_scores[conf_mask].squeeze()
-                    if class_scores.dim() == 0 or class_scores.nelement() == 0:
-                        detections_boxes[cl_ind - 1].append(np.asarray([]))
-                        continue
+            # iterate over all classes
+            for cl_ind in range(1, NUM_CLASSES):
+                class_scores = conf_scores[:, cl_ind].squeeze()
 
-                    boxes = decoded_boxes.clone()
-                    l_mask = conf_mask.unsqueeze(1).expand_as(boxes)
-                    boxes = boxes[l_mask].view(-1, 4)
+                # apply confidence threshold
+                conf_mask = class_scores.gt(CONF_THRESH)
+                class_scores = class_scores[conf_mask].squeeze()
+                if class_scores.dim() == 0 or class_scores.nelement() == 0:
+                    detections_boxes[cl_ind - 1].append(np.asarray([]))
+                    continue
+                boxes = decoded_boxes.clone()
+                l_mask = conf_mask.unsqueeze(1).expand_as(boxes)
+                boxes = boxes[l_mask].view(-1, 4)
 
-                    # indices of highest scoring and non-overlapping
-                    # boxes per class, after nms
-                    ids, counts = nms(boxes,
-                                      class_scores,
-                                      NMS_THRESH,
-                                      TOP_K)
-                    class_scores = class_scores[ids[:counts]].cpu().numpy()
-                    boxes = boxes[ids[:counts]].cpu().numpy()
-                    boxes[:, 0] *= width
-                    boxes[:, 2] *= width
-                    boxes[:, 1] *= height
-                    boxes[:, 3] *= height
+                # apply non-maximum suppression
+                # indices of top k highest scoring and non-overlapping
+                # boxes per class, after nms
+                ids, counts = nms(boxes,
+                                  class_scores,
+                                  NMS_THRESH,
+                                  TOP_K)
+                class_scores = class_scores[ids[:counts]].cpu().numpy()
+                boxes = boxes[ids[:counts]].cpu().numpy()
+                boxes[:, 0] *= width
+                boxes[:, 2] *= width
+                boxes[:, 1] *= height
+                boxes[:, 3] *= height
 
-                    for ik in range(boxes.shape[0]):
-                        boxes[ik, 0] = max(0, boxes[ik, 0])
-                        boxes[ik, 2] = min(width, boxes[ik, 2])
-                        boxes[ik, 1] = max(0, boxes[ik, 1])
-                        boxes[ik, 3] = min(height, boxes[ik, 3])
+                for ik in range(boxes.shape[0]):
+                    boxes[ik, 0] = max(0, boxes[ik, 0])
+                    boxes[ik, 2] = min(width, boxes[ik, 2])
+                    boxes[ik, 1] = max(0, boxes[ik, 1])
+                    boxes[ik, 3] = min(height, boxes[ik, 3])
 
-                    # append (num_dets) * (4 + 1) size array, so that
-                    # class_detections will be of shape:
-                    # (classes) * (samples) * (# dets. in sample for class) * (5)
-                    class_detections = np.hstack((
-                        boxes,
-                        class_scores[:, np.newaxis])
-                    ).astype(np.float32, copy=True)
-                    detections_boxes[cl_ind - 1].append(class_detections)
+                # append (num_dets) * (4 + 1) size array, so that
+                # class_detections will be of shape:
+                # (classes) * (samples) * (# dets. in sample for class) * (5)
+                class_detections = np.hstack((
+                    boxes,
+                    class_scores[:, np.newaxis])
+                ).astype(np.float32, copy=True)
+                detections_boxes[cl_ind - 1].append(class_detections)
 
-            if batch_ind == CUTOFF:
+            if sample_ind == CUTOFF:
                 return detections_boxes
 
     return detections_boxes
