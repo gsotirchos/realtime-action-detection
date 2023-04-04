@@ -4,11 +4,12 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.utils.data as data
+from torchinfo import summary
+
 from data import (CLASSES, AnnotationTransform, BaseTransform, UCF24Detection,
                   detection_collate, v2)
 from layers.box_utils import decode, nms
 from ssd import build_ssd
-from torchinfo import summary
 
 CUDA = False
 BASENET = "./rgb-ssd300_ucf24_120000.pth"  # pretrained model parameter file
@@ -44,99 +45,132 @@ def detect_actions(net, dataset):
     print('Number of images: ', len(dataset),
           '\nNumber of batches: ', num_samples)
 
-    detections_boxes = [[] for _ in range(NUM_CLASSES)]
-    batch_iterator = None
+    detections = [[] for _ in range(NUM_CLASSES)]
+    sample_itr = None
     with torch.no_grad():
         # iterate over samples
         for sample_ind in range(num_samples):
-            if not batch_iterator:
-                batch_iterator = iter(val_data_loader)
+            if not sample_itr:
+                sample_itr = iter(val_data_loader)
             if CUDA:
                 torch.cuda.synchronize()
 
             print('- Sample: ', sample_ind, '/', num_samples)
 
-            images, targets, img_indexs = next(batch_iterator)
+            # get the sample's data
+            images, targets, img_indexs = next(sample_itr)
             height, width = images.size(2), images.size(3)
 
             if CUDA:
                 images = images.cuda()
             output = net(images)
 
-            loc_data = output[0]
-            conf_preds = output[1]
-            prior_data = output[2]
-
-            decoded_boxes = decode(loc_data[0].data,
-                                   prior_data.data,
-                                   v2['variance']).clone()
-            conf_scores = net.softmax(conf_preds[0]).data.clone()
+            conf_scores, decoded_boxes = get_scores_and_boxes(output, net)
 
             # iterate over all classes
             for cl_ind in range(1, NUM_CLASSES):
-                class_scores = conf_scores[:, cl_ind].squeeze()
+                class_detections = get_class_detections(
+                    cl_ind,
+                    conf_scores,
+                    decoded_boxes,
+                    height, width)
 
-                # apply confidence threshold
-                conf_mask = class_scores.gt(CONF_THRESH)
-                class_scores = class_scores[conf_mask].squeeze()
-                if class_scores.dim() == 0 or class_scores.nelement() == 0:
-                    detections_boxes[cl_ind - 1].append(np.asarray([]))
-                    continue
-                boxes = decoded_boxes.clone()
-                l_mask = conf_mask.unsqueeze(1).expand_as(boxes)
-                boxes = boxes[l_mask].view(-1, 4)
-
-                # apply non-maximum suppression
-                # indices of top k highest scoring and non-overlapping
-                # boxes per class, after nms
-                ids, counts = nms(boxes,
-                                  class_scores,
-                                  NMS_THRESH,
-                                  TOP_K)
-                class_scores = class_scores[ids[:counts]].cpu().numpy()
-                boxes = boxes[ids[:counts]].cpu().numpy()
-                boxes[:, 0] *= width
-                boxes[:, 2] *= width
-                boxes[:, 1] *= height
-                boxes[:, 3] *= height
-
-                for ik in range(boxes.shape[0]):
-                    boxes[ik, 0] = max(0, boxes[ik, 0])
-                    boxes[ik, 2] = min(width, boxes[ik, 2])
-                    boxes[ik, 1] = max(0, boxes[ik, 1])
-                    boxes[ik, 3] = min(height, boxes[ik, 3])
-
-                # append (num_dets) * (4 + 1) size array, so that
-                # class_detections will be of shape:
-                # (classes) * (samples) * (# dets. in sample for class) * (5)
-                class_detections = np.hstack((
-                    boxes,
-                    class_scores[:, np.newaxis])
-                ).astype(np.float32, copy=True)
-                detections_boxes[cl_ind - 1].append(class_detections)
+                detections[cl_ind - 1].append(class_detections)
 
             if sample_ind == CUTOFF:
-                return detections_boxes
+                return detections
 
-    return detections_boxes
+    return detections
+
+
+def get_scores_and_boxes(output, net):
+    """ Retrieve the confidence scores and bounding boxes
+    from the net's output. """
+    # split the the output to:
+    loc_data = output[0]  # loc layers' output
+    conf_preds = output[1]  # confidence predictions
+    prior_data = output[2]  # prior boxes
+
+    # use the loc data to refine the prior boxes' coordinates
+    decoded_boxes = decode(loc_data[0].data,
+                           prior_data.data,
+                           v2['variance']
+                           ).clone()
+
+    # apply softmax to the confidence predictions
+    conf_scores = net.softmax(conf_preds[0]).data.clone()
+
+    return conf_scores, decoded_boxes
+
+
+def get_class_detections(cl_ind, conf_scores, decoded_boxes, height, width):
+    """ Process and retrieve the per-ckass confidence scores
+    and bounding boxes. """
+    class_scores = conf_scores[:, cl_ind].squeeze()
+
+    # filter the class scores with the confidence threshold
+    conf_mask = class_scores.gt(CONF_THRESH)
+    class_scores = class_scores[conf_mask].squeeze()
+    if class_scores.dim() == 0 or class_scores.nelement() == 0:
+        return np.asarray([])
+
+    # filter the bounding boxes with the confidence threshold
+    class_boxes = decoded_boxes.clone()
+    l_mask = conf_mask.unsqueeze(1).expand_as(class_boxes)
+    class_boxes = class_boxes[l_mask].view(-1, 4)
+
+    # apply non-maximum suppression
+    # indices of top k highest scoring and non-overlapping
+    # boxes per class, after nms
+    ids, counts = nms(class_boxes,
+                      class_scores,
+                      NMS_THRESH,
+                      TOP_K)
+
+    class_scores = class_scores[ids[:counts]].cpu().numpy()
+    class_boxes = class_boxes[ids[:counts]].cpu().numpy()
+    class_boxes[:, 0] *= width
+    class_boxes[:, 2] *= width
+    class_boxes[:, 1] *= height
+    class_boxes[:, 3] *= height
+
+    for ik in range(class_boxes.shape[0]):
+        class_boxes[ik, 0] = max(0, class_boxes[ik, 0])
+        class_boxes[ik, 2] = min(width, class_boxes[ik, 2])
+        class_boxes[ik, 1] = max(0, class_boxes[ik, 1])
+        class_boxes[ik, 3] = min(height, class_boxes[ik, 3])
+
+    # append (num_dets) * (4 + 1) size array, so that
+    # class_detections will be of shape:
+    # (classes) * (samples) * (# dets. in sample for class) * (5)
+    class_detections = np.hstack((
+        class_boxes,
+        class_scores[:, np.newaxis])
+    ).astype(np.float32, copy=True)
+
+    return class_detections
 
 
 def main():
-    # Load pre-trained model
+    # load pre-trained model
     net = build_ssd(SSD_DIM, NUM_CLASSES)  # initialize SSD
     if CUDA:
         net.load_state_dict(torch.load(BASENET))
     else:
         net.load_state_dict(torch.load(BASENET,
                                        map_location=torch.device('cpu')))
+
+    # print a summary of the loaded network's architecture
     summary(net)
+
     net.eval()
+
     if CUDA:
         net = net.cuda()
         cudnn.benchmark = True
     print('=== Finished loading model!')
 
-    # Load dataset
+    # load dataset
     dataset = UCF24Detection(DATASET_PATH,
                              'test',  # use the test split list
                              BaseTransform(SSD_DIM, MEANS),
@@ -147,15 +181,15 @@ def main():
         torch.cuda.synchronize()
     print('=== Finished loading dataset!')
 
-    # Generate per-frame detections
+    # generate per-frame detections
     tt0 = time.perf_counter()
-    detections_boxes = detect_actions(net, dataset)
+    detections = detect_actions(net, dataset)
     print('=== detection_boxes.shape: ',
-          len(detections_boxes),
+          len(detections),
           '*',
-          len(detections_boxes[0]),
+          len(detections[0]),
           '* N *',
-          len(detections_boxes[0][0][0]))
+          len(detections[0][0][0]))
 
     if CUDA:
         torch.cuda.synchronize()
