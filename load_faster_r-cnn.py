@@ -104,7 +104,7 @@ def get_scores_and_boxes(output, net):
 
 
 def get_class_detections(cl_ind, conf_scores, decoded_boxes, height, width):
-    """ Process and retrieve the per-ckass confidence scores
+    """ Process and retrieve the per-class confidence scores
     and bounding boxes. """
     class_scores = conf_scores[:, cl_ind].squeeze()
 
