@@ -3,5 +3,6 @@ ucf24
 *.log
 *.pyc
 *.pyo
+*.pth
 __pycache__/
 .idea/
