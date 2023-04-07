@@ -15,7 +15,7 @@ CUDA = False
 BASENET = "./rgb-ssd300_ucf24_120000.pth"  # pretrained model parameter file
 DATASET_PATH = "./ucf24/"  # dataset directory (needs that '/')
 NUM_CLASSES = len(CLASSES) + 1  # +1 'background' class
-CUTOFF = 20
+CUTOFF = 2000
 SSD_DIM = 300  # input size for SSD
 NUM_WORKERS = 0  # number of workers used in dataloading
 MEANS = (104, 117, 123)  # 'only support voc now'
@@ -151,6 +151,40 @@ def get_class_detections(cl_ind, conf_scores, decoded_boxes, height, width):
     return class_detections
 
 
+def setup_backbone(split='train'):
+
+    # load pre-trained model
+    net = build_ssd(SSD_DIM, NUM_CLASSES)  # initialize SSD
+    if CUDA:
+        net.load_state_dict(torch.load(BASENET))
+    else:
+        net.load_state_dict(torch.load(BASENET,
+                                       map_location=torch.device('cpu')))
+
+    # print a summary of the loaded network's architecture
+    summary(net)
+
+    net.eval()
+
+    if CUDA:
+        net = net.cuda()
+        cudnn.benchmark = True
+    print('=== Finished loading model!')
+
+    # load dataset
+    dataset = UCF24Detection(DATASET_PATH,
+                             split,  # use the test split list
+                             BaseTransform(SSD_DIM, MEANS),
+                             AnnotationTransform(),
+                             input_type="rgb",
+                             full_test=True)
+    if CUDA:
+        torch.cuda.synchronize()
+    print('=== Finished loading dataset!')
+
+    return net, dataset
+
+
 def main():
     # load pre-trained model
     net = build_ssd(SSD_DIM, NUM_CLASSES)  # initialize SSD
@@ -177,6 +211,8 @@ def main():
                              AnnotationTransform(),
                              input_type="rgb",
                              full_test=True)
+    print(dataset)
+    return
     if CUDA:
         torch.cuda.synchronize()
     print('=== Finished loading dataset!')
