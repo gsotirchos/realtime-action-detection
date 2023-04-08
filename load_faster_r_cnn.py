@@ -151,7 +151,7 @@ def get_class_detections(cl_ind, conf_scores, decoded_boxes, height, width):
     return class_detections
 
 
-def setup_backbone(split='train'):
+def setup_backbone(split='train', BASENET = './rgb-ssd300_ucf24_120000.pth', DATASET_PATH='./ucf24'):
 
     # load pre-trained model
     net = build_ssd(SSD_DIM, NUM_CLASSES)  # initialize SSD
@@ -183,7 +183,6 @@ def setup_backbone(split='train'):
     print('=== Finished loading dataset!')
 
     return net, dataset
-
 
 def main():
     # load pre-trained model
